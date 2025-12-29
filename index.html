@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Daily Time Budget</title>
+    <title>Daily Time Budget v2</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -38,7 +38,7 @@
 
         h1 { margin-top: 0; text-align: center; font-size: 1.5rem; }
 
-        /* Controls Section (Import/Export/Reset) */
+        /* Controls */
         .controls {
             display: flex;
             justify-content: flex-end;
@@ -57,7 +57,7 @@
         }
         .btn-secondary:hover { background-color: #f1f5f9; color: var(--text); }
 
-        /* Chart Area */
+        /* Chart */
         .chart-container {
             position: relative;
             height: 300px;
@@ -70,9 +70,10 @@
             font-weight: 500;
             margin-bottom: 20px;
             color: var(--primary);
+            font-size: 1.1rem;
         }
 
-        /* Input Area */
+        /* Inputs */
         .input-group {
             display: flex;
             gap: 10px;
@@ -89,8 +90,9 @@
         }
         input:focus { outline: 2px solid var(--primary); border-color: transparent; }
 
-        input[type="text"] { flex: 2; }
-        input[type="number"] { flex: 1; }
+        /* Flex sizing for inputs */
+        input[type="text"] { flex: 3; } /* Label takes most space */
+        input[type="number"] { flex: 1; min-width: 60px; } /* Small inputs for time */
 
         .btn-primary {
             padding: 10px 20px;
@@ -103,7 +105,7 @@
         }
         .btn-primary:hover { opacity: 0.9; }
 
-        /* List Area */
+        /* List */
         .activity-list {
             list-style: none;
             padding: 0;
@@ -116,10 +118,8 @@
             align-items: center;
             padding: 12px 10px;
             border-bottom: 1px solid var(--border);
-            transition: background 0.2s;
         }
         .activity-item:last-child { border-bottom: none; }
-        .activity-item:hover { background-color: #f8fafc; }
 
         .item-info { display: flex; align-items: center; gap: 10px; }
         .color-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
@@ -139,11 +139,10 @@
 <body>
 
 <div class="container">
-    
     <div class="controls">
-        <button class="btn-secondary" onclick="resetData()">Reset All</button>
-        <button class="btn-secondary" onclick="downloadData()">Download JSON</button>
-        <button class="btn-secondary" onclick="document.getElementById('importFile').click()">Upload JSON</button>
+        <button class="btn-secondary" onclick="resetData()">Reset</button>
+        <button class="btn-secondary" onclick="downloadData()">Download</button>
+        <button class="btn-secondary" onclick="document.getElementById('importFile').click()">Upload</button>
         <input type="file" id="importFile" style="display:none" onchange="importData(this)" accept=".json">
     </div>
 
@@ -158,26 +157,37 @@
     </div>
 
     <div class="input-group">
-        <input type="text" id="labelInput" placeholder="Activity (e.g. Sleep)" onkeypress="handleEnter(event)" />
-        <input type="number" id="hoursInput" placeholder="Hours" step="0.5" min="0.1" max="24" onkeypress="handleEnter(event)" />
+        <input type="text" id="labelInput" placeholder="Activity (e.g. Gym)" onkeypress="handleEnter(event)" />
+        <input type="number" id="hrsInput" placeholder="Hrs" min="0" max="24" onkeypress="handleEnter(event)" />
+        <input type="number" id="minsInput" placeholder="Mins" min="0" max="59" onkeypress="handleEnter(event)" />
+        
         <button class="btn-primary" onclick="addActivity()">Add</button>
     </div>
 
-    <ul class="activity-list" id="activityList">
-        </ul>
+    <ul class="activity-list" id="activityList"></ul>
 </div>
 
 <script>
-    // --- STATE MANAGEMENT ---
+    // --- STATE ---
     let activities = [];
-    const TOTAL_HOURS = 24;
+    const TOTAL_MINUTES = 24 * 60; // 1440 minutes
     let myChart = null;
-    const STORAGE_KEY = 'dailyTimeBudget_v1';
-    
-    // Nice color palette
+    const STORAGE_KEY = 'dailyTimeBudget_v2'; // New key to avoid conflicts with v1
     const palette = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#6366f1', '#14b8a6'];
 
-    // --- CORE LOGIC ---
+    // --- HELPERS ---
+
+    // Convert minutes to "1h 30m" or "45m" string
+    function formatTime(minutes) {
+        const h = Math.floor(minutes / 60);
+        const m = Math.round(minutes % 60);
+        
+        if (h > 0 && m > 0) return `${h}h ${m}m`;
+        if (h > 0) return `${h}h`;
+        return `${m}m`;
+    }
+
+    // --- CORE ---
 
     function init() {
         initChart();
@@ -192,26 +202,38 @@
 
     function addActivity() {
         const labelInput = document.getElementById('labelInput');
-        const hoursInput = document.getElementById('hoursInput');
+        const hrsInput = document.getElementById('hrsInput');
+        const minsInput = document.getElementById('minsInput');
         
         const label = labelInput.value.trim();
-        const hours = parseFloat(hoursInput.value);
-
-        if (!label || isNaN(hours) || hours <= 0) {
-            alert("Please enter a valid name and duration.");
-            return;
-        }
-
-        const currentTotal = activities.reduce((acc, curr) => acc + curr.hours, 0);
-        if (currentTotal + hours > TOTAL_HOURS) {
-            alert(`Not enough time! You only have ${(TOTAL_HOURS - currentTotal).toFixed(1)}h left.`);
-            return;
-        }
-
-        activities.push({ label, hours, id: Date.now() });
+        const hrs = parseInt(hrsInput.value) || 0;
+        const mins = parseInt(minsInput.value) || 0;
         
+        const totalDurationMins = (hrs * 60) + mins;
+
+        // Validation
+        if (!label) {
+            alert("Please enter an activity name.");
+            return;
+        }
+        if (totalDurationMins <= 0) {
+            alert("Duration must be greater than 0.");
+            return;
+        }
+
+        const currentUsed = activities.reduce((acc, curr) => acc + curr.minutes, 0);
+        if (currentUsed + totalDurationMins > TOTAL_MINUTES) {
+            const left = TOTAL_MINUTES - currentUsed;
+            alert(`Not enough time! You only have ${formatTime(left)} left.`);
+            return;
+        }
+
+        activities.push({ label, minutes: totalDurationMins, id: Date.now() });
+        
+        // Reset Inputs
         labelInput.value = '';
-        hoursInput.value = '';
+        hrsInput.value = '';
+        minsInput.value = '';
         labelInput.focus();
 
         updateAll();
@@ -240,13 +262,15 @@
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                animation: { duration: 500 },
+                animation: { duration: 400 },
                 plugins: {
-                    legend: { display: false }, // Hide default legend, we have the list
+                    legend: { display: false },
                     tooltip: {
                         callbacks: {
+                            // Custom tooltip to show "1h 30m" instead of raw minutes
                             label: function(context) {
-                                return ` ${context.label}: ${context.raw}h`;
+                                const rawMins = context.raw;
+                                return ` ${context.label}: ${formatTime(rawMins)}`;
                             }
                         }
                     }
@@ -256,18 +280,18 @@
     }
 
     function updateChart() {
-        const usedTime = activities.reduce((acc, curr) => acc + curr.hours, 0);
-        const freeTime = Math.max(0, TOTAL_HOURS - usedTime);
+        const usedMins = activities.reduce((acc, curr) => acc + curr.minutes, 0);
+        const freeMins = TOTAL_MINUTES - usedMins;
 
         const labels = activities.map(a => a.label);
-        const data = activities.map(a => a.hours);
+        const data = activities.map(a => a.minutes);
         const colors = activities.map((_, i) => palette[i % palette.length]);
 
-        // "Grey Section" Logic
-        if (freeTime > 0.01) { // small threshold to avoid float errors
-            labels.push('Remaining Free Time');
-            data.push(freeTime);
-            colors.push('#e2e8f0'); 
+        // "Grey Section" for Free Time
+        if (freeMins > 0) {
+            labels.push('Free Time');
+            data.push(freeMins);
+            colors.push('#e2e8f0');
         }
 
         myChart.data.labels = labels;
@@ -276,7 +300,7 @@
         myChart.update();
 
         document.getElementById('statusText').innerText = 
-            `${usedTime.toFixed(1)}h Allocated  |  ${freeTime.toFixed(1)}h Free`;
+            `${formatTime(usedMins)} Planned  |  ${formatTime(freeMins)} Free`;
     }
 
     function renderList() {
@@ -290,7 +314,7 @@
             li.innerHTML = `
                 <div class="item-info">
                     <span class="color-dot" style="background-color: ${color}"></span>
-                    <span><strong>${act.label}</strong> (${act.hours}h)</span>
+                    <span><strong>${act.label}</strong>: ${formatTime(act.minutes)}</span>
                 </div>
                 <button class="delete-btn" onclick="removeActivity(${index})">Remove</button>
             `;
@@ -298,7 +322,7 @@
         });
     }
 
-    // --- DATA PERSISTENCE & IMPORT/EXPORT ---
+    // --- STORAGE & FILES ---
 
     function saveToStorage() {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(activities));
@@ -309,61 +333,47 @@
         if (saved) {
             try {
                 activities = JSON.parse(saved);
-            } catch (e) {
-                console.error("Corrupt data found");
-            }
+            } catch (e) { console.error("Data Load Error"); }
         }
         updateChart();
         renderList();
     }
 
     function downloadData() {
-        if (activities.length === 0) {
-            alert("Nothing to export!");
-            return;
-        }
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(activities));
-        const downloadAnchorNode = document.createElement('a');
-        downloadAnchorNode.setAttribute("href", dataStr);
-        downloadAnchorNode.setAttribute("download", "daily_budget.json");
-        document.body.appendChild(downloadAnchorNode);
-        downloadAnchorNode.click();
-        downloadAnchorNode.remove();
+        const a = document.createElement('a');
+        a.href = dataStr;
+        a.download = "daily_budget_v2.json";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
     }
 
     function importData(input) {
         const file = input.files[0];
         if(!file) return;
-
         const reader = new FileReader();
         reader.onload = function(e) {
             try {
                 const json = JSON.parse(e.target.result);
-                if (Array.isArray(json)) {
-                    // Simple validation: check if items have hours and label
-                    const valid = json.every(item => item.label && item.hours);
-                    if(valid) {
-                        if(confirm("This will overwrite your current list. Continue?")) {
-                            activities = json;
-                            updateAll();
-                        }
-                    } else {
-                        alert("Invalid JSON format. File must be an array of activities.");
+                // Check if data uses 'minutes' instead of 'hours'
+                const valid = Array.isArray(json) && json.every(i => i.label && i.minutes !== undefined);
+                if(valid) {
+                    if(confirm("Overwrite current list?")) {
+                        activities = json;
+                        updateAll();
                     }
                 } else {
-                    alert("Invalid JSON format.");
+                    alert("Invalid file format (must be v2 JSON).");
                 }
-            } catch(err) {
-                alert("Error reading file");
-            }
-            // Clear input so same file can be selected again if needed
+            } catch(err) { alert("Error reading file"); }
             input.value = '';
         };
         reader.readAsText(file);
     }
 
     function resetData() {
-        if(confirm("Clear all activities?")) {
+        if(confirm("Reset everything?")) {
             activities = [];
             updateAll();
         }
@@ -373,7 +383,6 @@
         if (e.key === 'Enter') addActivity();
     }
 
-    // Start App
     init();
 </script>
 
