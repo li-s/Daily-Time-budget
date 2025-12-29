@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Time Budget</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --danger: #ef4444;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --border: #e2e8f0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 600px;
+            width: 100%;
+            background: var(--card);
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 { margin-top: 0; text-align: center; font-size: 1.5rem; }
+
+        /* Controls Section (Import/Export/Reset) */
+        .controls {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .btn-secondary {
+            background-color: transparent;
+            color: #64748b;
+            border: 1px solid #cbd5e1;
+            padding: 5px 10px;
+            font-size: 0.8rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .btn-secondary:hover { background-color: #f1f5f9; color: var(--text); }
+
+        /* Chart Area */
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .stats {
+            text-align: center;
+            font-weight: 500;
+            margin-bottom: 20px;
+            color: var(--primary);
+        }
+
+        /* Input Area */
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        input {
+            padding: 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        input:focus { outline: 2px solid var(--primary); border-color: transparent; }
+
+        input[type="text"] { flex: 2; }
+        input[type="number"] { flex: 1; }
+
+        .btn-primary {
+            padding: 10px 20px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .btn-primary:hover { opacity: 0.9; }
+
+        /* List Area */
+        .activity-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .activity-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 10px;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
+        }
+        .activity-item:last-child { border-bottom: none; }
+        .activity-item:hover { background-color: #f8fafc; }
+
+        .item-info { display: flex; align-items: center; gap: 10px; }
+        .color-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+
+        .delete-btn {
+            color: var(--danger);
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 5px;
+            font-size: 0.9rem;
+        }
+        .delete-btn:hover { text-decoration: underline; }
+
+    </style>
+</head>
+<body>
+
+<div class="container">
+    
+    <div class="controls">
+        <button class="btn-secondary" onclick="resetData()">Reset All</button>
+        <button class="btn-secondary" onclick="downloadData()">Download JSON</button>
+        <button class="btn-secondary" onclick="document.getElementById('importFile').click()">Upload JSON</button>
+        <input type="file" id="importFile" style="display:none" onchange="importData(this)" accept=".json">
+    </div>
+
+    <h1>Daily Time Budget</h1>
+
+    <div class="chart-container">
+        <canvas id="timeChart"></canvas>
+    </div>
+
+    <div class="stats" id="statusText">
+        Loading...
+    </div>
+
+    <div class="input-group">
+        <input type="text" id="labelInput" placeholder="Activity (e.g. Sleep)" onkeypress="handleEnter(event)" />
+        <input type="number" id="hoursInput" placeholder="Hours" step="0.5" min="0.1" max="24" onkeypress="handleEnter(event)" />
+        <button class="btn-primary" onclick="addActivity()">Add</button>
+    </div>
+
+    <ul class="activity-list" id="activityList">
+        </ul>
+</div>
+
+<script>
+    // --- STATE MANAGEMENT ---
+    let activities = [];
+    const TOTAL_HOURS = 24;
+    let myChart = null;
+    const STORAGE_KEY = 'dailyTimeBudget_v1';
+    
+    // Nice color palette
+    const palette = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#6366f1', '#14b8a6'];
+
+    // --- CORE LOGIC ---
+
+    function init() {
+        initChart();
+        loadFromStorage();
+    }
+
+    function updateAll() {
+        updateChart();
+        renderList();
+        saveToStorage();
+    }
+
+    function addActivity() {
+        const labelInput = document.getElementById('labelInput');
+        const hoursInput = document.getElementById('hoursInput');
+        
+        const label = labelInput.value.trim();
+        const hours = parseFloat(hoursInput.value);
+
+        if (!label || isNaN(hours) || hours <= 0) {
+            alert("Please enter a valid name and duration.");
+            return;
+        }
+
+        const currentTotal = activities.reduce((acc, curr) => acc + curr.hours, 0);
+        if (currentTotal + hours > TOTAL_HOURS) {
+            alert(`Not enough time! You only have ${(TOTAL_HOURS - currentTotal).toFixed(1)}h left.`);
+            return;
+        }
+
+        activities.push({ label, hours, id: Date.now() });
+        
+        labelInput.value = '';
+        hoursInput.value = '';
+        labelInput.focus();
+
+        updateAll();
+    }
+
+    function removeActivity(index) {
+        activities.splice(index, 1);
+        updateAll();
+    }
+
+    // --- VISUALIZATION ---
+
+    function initChart() {
+        const ctx = document.getElementById('timeChart').getContext('2d');
+        myChart = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [],
+                    borderWidth: 2,
+                    borderColor: '#ffffff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 500 },
+                plugins: {
+                    legend: { display: false }, // Hide default legend, we have the list
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return ` ${context.label}: ${context.raw}h`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function updateChart() {
+        const usedTime = activities.reduce((acc, curr) => acc + curr.hours, 0);
+        const freeTime = Math.max(0, TOTAL_HOURS - usedTime);
+
+        const labels = activities.map(a => a.label);
+        const data = activities.map(a => a.hours);
+        const colors = activities.map((_, i) => palette[i % palette.length]);
+
+        // "Grey Section" Logic
+        if (freeTime > 0.01) { // small threshold to avoid float errors
+            labels.push('Remaining Free Time');
+            data.push(freeTime);
+            colors.push('#e2e8f0'); 
+        }
+
+        myChart.data.labels = labels;
+        myChart.data.datasets[0].data = data;
+        myChart.data.datasets[0].backgroundColor = colors;
+        myChart.update();
+
+        document.getElementById('statusText').innerText = 
+            `${usedTime.toFixed(1)}h Allocated  |  ${freeTime.toFixed(1)}h Free`;
+    }
+
+    function renderList() {
+        const list = document.getElementById('activityList');
+        list.innerHTML = '';
+
+        activities.forEach((act, index) => {
+            const color = palette[index % palette.length];
+            const li = document.createElement('li');
+            li.className = 'activity-item';
+            li.innerHTML = `
+                <div class="item-info">
+                    <span class="color-dot" style="background-color: ${color}"></span>
+                    <span><strong>${act.label}</strong> (${act.hours}h)</span>
+                </div>
+                <button class="delete-btn" onclick="removeActivity(${index})">Remove</button>
+            `;
+            list.appendChild(li);
+        });
+    }
+
+    // --- DATA PERSISTENCE & IMPORT/EXPORT ---
+
+    function saveToStorage() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(activities));
+    }
+
+    function loadFromStorage() {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            try {
+                activities = JSON.parse(saved);
+            } catch (e) {
+                console.error("Corrupt data found");
+            }
+        }
+        updateChart();
+        renderList();
+    }
+
+    function downloadData() {
+        if (activities.length === 0) {
+            alert("Nothing to export!");
+            return;
+        }
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(activities));
+        const downloadAnchorNode = document.createElement('a');
+        downloadAnchorNode.setAttribute("href", dataStr);
+        downloadAnchorNode.setAttribute("download", "daily_budget.json");
+        document.body.appendChild(downloadAnchorNode);
+        downloadAnchorNode.click();
+        downloadAnchorNode.remove();
+    }
+
+    function importData(input) {
+        const file = input.files[0];
+        if(!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const json = JSON.parse(e.target.result);
+                if (Array.isArray(json)) {
+                    // Simple validation: check if items have hours and label
+                    const valid = json.every(item => item.label && item.hours);
+                    if(valid) {
+                        if(confirm("This will overwrite your current list. Continue?")) {
+                            activities = json;
+                            updateAll();
+                        }
+                    } else {
+                        alert("Invalid JSON format. File must be an array of activities.");
+                    }
+                } else {
+                    alert("Invalid JSON format.");
+                }
+            } catch(err) {
+                alert("Error reading file");
+            }
+            // Clear input so same file can be selected again if needed
+            input.value = '';
+        };
+        reader.readAsText(file);
+    }
+
+    function resetData() {
+        if(confirm("Clear all activities?")) {
+            activities = [];
+            updateAll();
+        }
+    }
+
+    function handleEnter(e) {
+        if (e.key === 'Enter') addActivity();
+    }
+
+    // Start App
+    init();
+</script>
+
+</body>
+</html>
